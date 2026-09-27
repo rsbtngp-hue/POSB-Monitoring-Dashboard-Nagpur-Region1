@@ -1,0 +1,86 @@
+name: Build POSB Nagpur Viewer APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+      - name: Download Gradle
+        run: |
+          curl -L -o gradle.zip https://services.gradle.org/distributions/gradle-8.11.1-bin.zip
+          unzip -q gradle.zip
+      - name: Reconstruct Android project
+        run: |
+          mkdir -p app/src/main/assets app/src/main/java/com/nagpur/posbviewer app/src/main/res/values app/src/main/res/drawable
+          cp index.html app/src/main/assets/index.html
+          cat > settings.gradle <<'EOG'
+pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }
+rootProject.name='POSB-Nagpur-Viewer'
+include ':app'
+EOG
+          cat > build.gradle <<'EOG'
+plugins { id 'com.android.application' version '8.7.3' apply false }
+EOG
+          cat > gradle.properties <<'EOG'
+org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+android.useAndroidX=true
+EOG
+          cat > app/build.gradle <<'EOG'
+plugins { id 'com.android.application' }
+android { namespace 'com.nagpur.posbviewer'; compileSdk 35
+  defaultConfig { applicationId 'com.nagpur.posbviewer'; minSdk 23; targetSdk 35; versionCode 1; versionName '1.1.0' }
+}
+EOG
+          cat > app/src/main/AndroidManifest.xml <<'EOG'
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.INTERNET"/>
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+  <application android:theme="@style/Theme.POSBNagpurViewer" android:label="POSB Nagpur Viewer" android:usesCleartextTraffic="false" android:hardwareAccelerated="true">
+    <activity android:name=".MainActivity" android:screenOrientation="unspecified" android:exported="true">
+      <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/></intent-filter>
+    </activity>
+  </application>
+</manifest>
+EOG
+          cat > app/src/main/java/com/nagpur/posbviewer/MainActivity.java <<'EOG'
+package com.nagpur.posbviewer;
+import android.app.*;import android.os.*;import android.view.*;import android.webkit.*;import android.net.*;import android.content.*;import android.graphics.Color;import android.graphics.drawable.GradientDrawable;import android.view.Gravity;import android.widget.*;
+public class MainActivity extends Activity{
+ WebView w; TextView banner;
+ public void onCreate(Bundle b){super.onCreate(b); LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);
+ banner=new TextView(this);banner.setText("Offline mode • Showing local/cached dashboard data when available");banner.setTextColor(Color.WHITE);banner.setTextSize(12);banner.setGravity(Gravity.CENTER);banner.setPadding(12,8,12,8);GradientDrawable g=new GradientDrawable();g.setColor(Color.rgb(180,83,9));banner.setBackground(g);banner.setVisibility(View.GONE);root.addView(banner,new LinearLayout.LayoutParams(-1,-2));
+ w=new WebView(this);root.addView(w,new LinearLayout.LayoutParams(-1,0,1));setContentView(root);WebSettings s=w.getSettings();s.setJavaScriptEnabled(true);s.setDomStorageEnabled(true);s.setDatabaseEnabled(true);s.setAllowFileAccess(true);s.setAllowContentAccess(true);s.setBuiltInZoomControls(false);s.setDisplayZoomControls(false);s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);w.setWebViewClient(new WebViewClient());w.setWebChromeClient(new WebChromeClient());w.loadUrl("file:///android_asset/index.html");update();}
+ void update(){ConnectivityManager c=(ConnectivityManager)getSystemService(Context.CONNECTIVITY_SERVICE);NetworkCapabilities n=c==null?null:c.getNetworkCapabilities(c.getActiveNetwork());boolean ok=n!=null&&(n.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)||n.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)||n.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET));banner.setVisibility(ok?View.GONE:View.VISIBLE);}
+ public void onBackPressed(){if(w.canGoBack())w.goBack();else super.onBackPressed();} protected void onResume(){super.onResume();update();}
+}
+EOG
+          cat > app/src/main/res/values/colors.xml <<'EOG'
+<resources><color name="primary">#1D4ED8</color><color name="white">#FFFFFF</color></resources>
+EOG
+          cat > app/src/main/res/values/strings.xml <<'EOG'
+<resources><string name="app_name">POSB Nagpur Viewer</string></resources>
+EOG
+          cat > app/src/main/res/values/themes.xml <<'EOG'
+<resources><style name="Theme.POSBNagpurViewer" parent="android:style/Theme.Material.Light.NoActionBar"><item name="android:fontFamily">sans</item><item name="android:colorAccent">@color/primary</item><item name="android:navigationBarColor">#000000</item><item name="android:statusBarColor">#1D4ED8</item></style></resources>
+EOG
+      - name: Build debug APK
+        run: ./gradle-8.11.1/bin/gradle --no-daemon assembleDebug
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: POSB-Nagpur-Viewer-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
